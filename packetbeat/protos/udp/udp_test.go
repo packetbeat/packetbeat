@@ -16,7 +16,6 @@
 // under the License.
 
 //go:build !integration
-// +build !integration
 
 package udp
 
@@ -111,7 +110,7 @@ func testSetup(t *testing.T) *TestStruct {
 	plugin := &TestProtocol{Ports: []int{PORT}}
 	protocols.udp[PROTO] = plugin
 
-	udp, err := NewUDP(protocols, "test", "test")
+	udp, err := NewUDP(protocols, "test", "test", 0)
 	if err != nil {
 		t.Error("Error creating UDP handler: ", err)
 	}

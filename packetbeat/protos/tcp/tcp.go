@@ -60,7 +60,7 @@ type TCP struct {
 }
 
 // Creates and returns a new Tcp.
-func NewTCP(p protos.Protocols, id, device string) (*TCP, error) {
+func NewTCP(p protos.Protocols, id, device string, idx int) (*TCP, error) {
 	isDebug = logp.IsDebug("tcp")
 
 	portMap, err := buildPortsMap(p.GetAllTCP())
@@ -71,7 +71,7 @@ func NewTCP(p protos.Protocols, id, device string) (*TCP, error) {
 	tcp := &TCP{
 		protocols: p,
 		portMap:   portMap,
-		metrics:   newInputMetrics(id, device, portMap),
+		metrics:   newInputMetrics(fmt.Sprintf("%s_%d", id, idx), device, portMap),
 	}
 	tcp.streams = common.NewCacheWithRemovalListener(
 		protos.DefaultTransactionExpiration,
@@ -98,10 +98,6 @@ func (tcp *TCP) removalListener(_ common.Key, value common.Value) {
 }
 
 func (tcp *TCP) Process(id *flows.FlowID, tcphdr *layers.TCP, pkt *protos.Packet) {
-	// This Recover should catch all exceptions in
-	// protocol modules.
-	defer logp.Recover("Process tcp exception")
-
 	tcp.expiredConns.notifyAll()
 
 	stream, created := tcp.getStream(pkt)

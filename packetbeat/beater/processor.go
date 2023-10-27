@@ -123,6 +123,24 @@ func (p *processorFactory) Create(pipeline beat.PipelineConnector, cfg *conf.C) 
 		logp.Err("Failed to generate ID from config: %v, %v", err, config)
 		return nil, err
 	}
+	if len(config.Interfaces) != 0 {
+		// Install Npcap if needed. This needs to happen before any other
+		// work on Windows, including config checking, because that involves
+		// probing interfaces.
+		//
+		// Users may block installation of Npcap, so we defer the install
+		// until we have a configuration that will tell us if it has been
+		// blocked. To do this we must have a valid config.
+		//
+		// When Packetbeat is managed by fleet we will only have this if
+		// Create has been called via the agent Reload process. We take
+		// the opportunity to not install the DLL if there is no configured
+		// interface.
+		err := installNpcap(p.beat, cfg)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	publisher, err := publish.NewTransactionPublisher(
 		p.beat.Info.Name,
@@ -135,7 +153,7 @@ func (p *processorFactory) Create(pipeline beat.PipelineConnector, cfg *conf.C) 
 		return nil, err
 	}
 
-	watcher := procs.ProcessesWatcher{}
+	watcher := &procs.ProcessesWatcher{}
 	// Enable the process watcher only if capturing live traffic
 	if config.Interfaces[0].File == "" {
 		err = watcher.Init(config.Procs)
@@ -157,7 +175,7 @@ func (p *processorFactory) Create(pipeline beat.PipelineConnector, cfg *conf.C) 
 	if err != nil {
 		return nil, err
 	}
-	sniffer, err := setupSniffer(config, protocols, sniffer.DecodersFor(id, publisher, protocols, watcher, flows, config))
+	sniffer, err := setupSniffer(id, config, protocols, sniffer.DecodersFor(id, publisher, protocols, watcher, flows, config))
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +185,7 @@ func (p *processorFactory) Create(pipeline beat.PipelineConnector, cfg *conf.C) 
 
 // setupFlows returns a *flows.Flows that will publish to the provided pipeline,
 // configured with cfg and process enrichment via the provided watcher.
-func setupFlows(pipeline beat.Pipeline, watcher procs.ProcessesWatcher, cfg config.Config) (*flows.Flows, error) {
+func setupFlows(pipeline beat.Pipeline, watcher *procs.ProcessesWatcher, cfg config.Config) (*flows.Flows, error) {
 	if !cfg.Flows.IsEnabled() {
 		return nil, nil
 	}
@@ -196,20 +214,37 @@ func setupFlows(pipeline beat.Pipeline, watcher procs.ProcessesWatcher, cfg conf
 	return flows.NewFlows(client.PublishAll, watcher, cfg.Flows)
 }
 
-func setupSniffer(cfg config.Config, protocols *protos.ProtocolsStruct, decoders sniffer.Decoders) (*sniffer.Sniffer, error) {
+func setupSniffer(id string, cfg config.Config, protocols *protos.ProtocolsStruct, decoders sniffer.Decoders) (*sniffer.Sniffer, error) {
 	icmp, err := cfg.ICMP()
 	if err != nil {
 		return nil, err
 	}
 
-	for i, iface := range cfg.Interfaces {
+	// Ensure interfaces are uniquely represented so we don't listen on the
+	// same interface with multiple sniffers.
+	interfaces := make([]config.InterfaceConfig, 0, len(cfg.Interfaces))
+	seen := make(map[uint64]bool)
+	for _, iface := range cfg.Interfaces {
+		// Currently we hash on all fields in the config. We can revise this in future.
+		h, err := hashstructure.Hash(iface, nil)
+		if err != nil {
+			return nil, fmt.Errorf("could not deduplicate interface configurations: %w", err)
+		}
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
+		interfaces = append(interfaces, iface)
+	}
+
+	for i, iface := range interfaces {
 		if iface.BpfFilter != "" || cfg.Flows.IsEnabled() {
 			continue
 		}
-		cfg.Interfaces[i].BpfFilter = protocols.BpfFilter(iface.WithVlans, icmp.Enabled())
+		interfaces[i].BpfFilter = protocols.BpfFilter(iface.WithVlans, icmp.Enabled())
 	}
 
-	return sniffer.New(false, "", decoders, cfg.Interfaces)
+	return sniffer.New(id, false, "", decoders, interfaces)
 }
 
 // CheckConfig performs a dry-run creation of a Packetbeat pipeline based

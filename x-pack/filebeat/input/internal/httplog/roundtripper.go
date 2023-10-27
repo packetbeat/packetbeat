@@ -53,26 +53,27 @@ type LoggingRoundTripper struct {
 // the request and response to the underlying logger.
 //
 // Fields logged in requests:
-//  url.original
-//  url.scheme
-//  url.path
-//  url.domain
-//  url.port
-//  url.query
-//  http.request
-//  user_agent.original
-//  http.request.body.content
-//  http.request.body.bytes
-//  http.request.mime_type
-//  event.original (the full request and body from httputil.DumpRequestOut)
+//
+//	url.original
+//	url.scheme
+//	url.path
+//	url.domain
+//	url.port
+//	url.query
+//	http.request
+//	user_agent.original
+//	http.request.body.content
+//	http.request.body.bytes
+//	http.request.mime_type
+//	event.original (the request without body from httputil.DumpRequestOut)
 //
 // Fields logged in responses:
-//  http.response.status_code
-//  http.response.body.content
-//  http.response.body.bytes
-//  http.response.mime_type
-//  event.original (the full response and body from httputil.DumpResponse)
 //
+//	http.response.status_code
+//	http.response.body.content
+//	http.response.body.bytes
+//	http.response.mime_type
+//	event.original (the response without body from httputil.DumpResponse)
 func (rt *LoggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Create a child logger for this request.
 	log := rt.logger.With(
@@ -110,7 +111,7 @@ func (rt *LoggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 			zap.String("http.request.mime_type", req.Header.Get("Content-Type")),
 		)
 	}
-	message, err := httputil.DumpRequestOut(req, true)
+	message, err := httputil.DumpRequestOut(req, false)
 	if err != nil {
 		errorsMessages = append(errorsMessages, fmt.Sprintf("failed to dump request: %s", err))
 	} else {
@@ -148,7 +149,7 @@ func (rt *LoggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 			zap.String("http.response.mime_type", resp.Header.Get("Content-Type")),
 		)
 	}
-	message, err = httputil.DumpResponse(resp, true)
+	message, err = httputil.DumpResponse(resp, false)
 	if err != nil {
 		errorsMessages = append(errorsMessages, fmt.Sprintf("failed to dump response: %s", err))
 	} else {
@@ -157,9 +158,9 @@ func (rt *LoggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	switch len(errorsMessages) {
 	case 0:
 	case 1:
-		respParts = append(reqParts, zap.String("error.message", errorsMessages[0]))
+		respParts = append(respParts, zap.String("error.message", errorsMessages[0]))
 	default:
-		respParts = append(reqParts, zap.Strings("error.message", errorsMessages))
+		respParts = append(respParts, zap.Strings("error.message", errorsMessages))
 	}
 	log.Debug("HTTP response", respParts...)
 

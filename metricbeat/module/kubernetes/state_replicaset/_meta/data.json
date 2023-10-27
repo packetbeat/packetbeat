@@ -6,15 +6,15 @@
         "module": "kubernetes"
     },
     "kubernetes": {
-        "namespace": "default",
+        "namespace": "kube-system",
         "replicaset": {
-            "name": "jumpy-owl-redis-3481028193",
+            "name": "coredns-787d4945fb",
             "replicas": {
-                "available": 1,
-                "desired": 1,
-                "labeled": 1,
+                "available": 2,
+                "desired": 2,
+                "labeled": 2,
                 "observed": 1,
-                "ready": 0
+                "ready": 2
             }
         }
     },

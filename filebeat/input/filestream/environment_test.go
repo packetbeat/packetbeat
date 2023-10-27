@@ -16,16 +16,16 @@
 // under the License.
 
 //go:build integration
-// +build integration
 
 package filestream
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -66,6 +66,24 @@ type registryEntry struct {
 }
 
 func newInputTestingEnvironment(t *testing.T) *inputTestingEnvironment {
+	if err := logp.DevelopmentSetup(logp.ToObserverOutput()); err != nil {
+		t.Fatalf("error setting up dev logging: %s", err)
+	}
+
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("Debug Logs:\n")
+			for _, log := range logp.ObserverLogs().TakeAll() {
+				data, err := json.Marshal(log)
+				if err != nil {
+					t.Errorf("failed encoding log as JSON: %s", err)
+				}
+				t.Logf("%s", string(data))
+			}
+			return
+		}
+	})
+
 	return &inputTestingEnvironment{
 		t:          t,
 		workingDir: t.TempDir(),
@@ -112,8 +130,7 @@ func (e *inputTestingEnvironment) startInput(ctx context.Context, inp v2.Input) 
 	go func(wg *sync.WaitGroup, grp *unison.TaskGroup) {
 		defer wg.Done()
 		defer grp.Stop()
-
-		inputCtx := input.Context{Logger: logp.L(), Cancelation: ctx}
+		inputCtx := input.Context{Logger: logp.L(), Cancelation: ctx, ID: "fake-ID"}
 		inp.Run(inputCtx, e.pipeline)
 	}(&e.wg, &e.grp)
 }
@@ -122,15 +139,15 @@ func (e *inputTestingEnvironment) waitUntilInputStops() {
 	e.wg.Wait()
 }
 
-func (e *inputTestingEnvironment) mustWriteLinesToFile(filename string, lines []byte) {
+func (e *inputTestingEnvironment) mustWriteToFile(filename string, data []byte) {
 	path := e.abspath(filename)
-	err := ioutil.WriteFile(path, lines, 0o644)
+	err := os.WriteFile(path, data, 0o644)
 	if err != nil {
 		e.t.Fatalf("failed to write file '%s': %+v", path, err)
 	}
 }
 
-func (e *inputTestingEnvironment) mustAppendLinesToFile(filename string, lines []byte) {
+func (e *inputTestingEnvironment) mustAppendToFile(filename string, data []byte) {
 	path := e.abspath(filename)
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
@@ -138,9 +155,9 @@ func (e *inputTestingEnvironment) mustAppendLinesToFile(filename string, lines [
 	}
 	defer f.Close()
 
-	_, err = f.Write(lines)
+	_, err = f.Write(data)
 	if err != nil {
-		e.t.Fatalf("append lines to file '%s': %+v", path, err)
+		e.t.Fatalf("append data to file '%s': %+v", path, err)
 	}
 }
 
@@ -196,6 +213,8 @@ func (e *inputTestingEnvironment) requireRegistryEntryCount(expectedCount int) {
 // requireOffsetInRegistry checks if the expected offset is set for a file.
 func (e *inputTestingEnvironment) requireOffsetInRegistry(filename, inputID string, expectedOffset int) {
 	e.t.Helper()
+	var offsetStr strings.Builder
+
 	filepath := e.abspath(filename)
 	fi, err := os.Stat(filepath)
 	if err != nil {
@@ -204,16 +223,23 @@ func (e *inputTestingEnvironment) requireOffsetInRegistry(filename, inputID stri
 
 	id := getIDFromPath(filepath, inputID, fi)
 	var entry registryEntry
-	require.Eventually(e.t, func() bool {
+	require.Eventuallyf(e.t, func() bool {
+		offsetStr.Reset()
+
 		entry, err = e.getRegistryState(id)
 		if err != nil {
-			return true
+			e.t.Fatalf("could not get state for '%s' from registry, err: %s", id, err)
 		}
 
+		fmt.Fprint(&offsetStr, entry.Cursor.Offset)
+
 		return expectedOffset == entry.Cursor.Offset
-	}, time.Second, time.Millisecond)
-	require.NoError(e.t, err)
-	require.Equal(e.t, expectedOffset, entry.Cursor.Offset)
+	},
+		time.Second,
+		100*time.Millisecond,
+		"expected offset: '%d', cursor offset: '%s'",
+		expectedOffset,
+		&offsetStr)
 }
 
 // requireMetaInRegistry checks if the expected metadata is saved to the registry.
@@ -253,7 +279,16 @@ func requireMetadataEquals(one, other fileMeta) bool {
 }
 
 // waitUntilOffsetInRegistry waits for the expected offset is set for a file.
-func (e *inputTestingEnvironment) waitUntilOffsetInRegistry(filename, inputID string, expectedOffset int) {
+// If timeout is reached or there is an error getting the state from the
+// registry, the test fails
+func (e *inputTestingEnvironment) waitUntilOffsetInRegistry(
+	filename, inputID string,
+	expectedOffset int,
+	timeout time.Duration) {
+
+	var cursorString strings.Builder
+	var fileSizeString strings.Builder
+
 	filepath := e.abspath(filename)
 	fi, err := os.Stat(filepath)
 	if err != nil {
@@ -261,12 +296,34 @@ func (e *inputTestingEnvironment) waitUntilOffsetInRegistry(filename, inputID st
 	}
 
 	id := getIDFromPath(filepath, inputID, fi)
-	entry, err := e.getRegistryState(id)
-	for err != nil || entry.Cursor.Offset != expectedOffset {
-		entry, err = e.getRegistryState(id)
-	}
 
-	require.Equal(e.t, expectedOffset, entry.Cursor.Offset)
+	require.Eventuallyf(e.t, func() bool {
+		cursorString.Reset()
+		fileSizeString.Reset()
+
+		entry, err := e.getRegistryState(id)
+		if err != nil {
+			e.t.Fatalf(
+				"error getting state for ID '%s' from the registry, err: %s",
+				id, err)
+		}
+
+		fi, err := os.Stat(filepath)
+		if err != nil {
+			e.t.Fatalf("could not stat '%s', err: %s", filepath, err)
+		}
+
+		fileSizeString.WriteString(fmt.Sprint(fi.Size()))
+		cursorString.WriteString(fmt.Sprint(entry.Cursor.Offset))
+
+		return entry.Cursor.Offset == expectedOffset
+	},
+		timeout,
+		100*time.Millisecond,
+		"expected offset: '%d', cursor offset: '%s', file size: '%s'",
+		expectedOffset,
+		&cursorString,
+		&fileSizeString)
 }
 
 func (e *inputTestingEnvironment) requireNoEntryInRegistry(filename, inputID string) {
@@ -317,7 +374,7 @@ func (e *inputTestingEnvironment) getRegistryState(key string) (registryEntry, e
 
 func getIDFromPath(filepath, inputID string, fi os.FileInfo) string {
 	identifier, _ := newINodeDeviceIdentifier(nil)
-	src := identifier.GetSource(loginp.FSEvent{Info: fi, Op: loginp.OpCreate, NewPath: filepath})
+	src := identifier.GetSource(loginp.FSEvent{Descriptor: loginp.FileDescriptor{Info: fi}, Op: loginp.OpCreate, NewPath: filepath})
 	return "filestream::" + inputID + "::" + src.Name()
 }
 
@@ -332,6 +389,38 @@ func (e *inputTestingEnvironment) waitUntilEventCount(count int) {
 			e.t.Fatalf("too many events; expected: %d, actual: %d", count, sum)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// waitUntilEventCountCtx calls waitUntilEventCount, but fails if ctx is cancelled.
+func (e *inputTestingEnvironment) waitUntilEventCountCtx(ctx context.Context, count int) {
+	e.t.Helper()
+	ch := make(chan struct{})
+
+	go func() {
+		e.waitUntilEventCount(count)
+		ch <- struct{}{}
+	}()
+
+	select {
+	case <-ctx.Done():
+		logLines := map[string][]string{}
+		for _, e := range e.pipeline.GetAllEvents() {
+			flat := e.Fields.Flatten()
+			pathi, _ := flat.GetValue("log.file.path")
+			path := pathi.(string)
+			msgi, _ := flat.GetValue("message")
+			msg := msgi.(string)
+			logLines[path] = append(logLines[path], msg)
+		}
+
+		e.t.Fatalf("waitUntilEventCountCtx: %v. Want %d events, got %d: %v",
+			ctx.Err(),
+			count,
+			len(e.pipeline.GetAllEvents()),
+			logLines)
+	case <-ch:
+		return
 	}
 }
 
@@ -378,7 +467,8 @@ func (e *inputTestingEnvironment) requireEventsReceived(events []string) {
 		}
 	}
 
-	require.Equal(e.t, 0, len(missingEvents), "following events are missing: %+v", missingEvents)
+	require.Equal(e.t, 0, len(missingEvents),
+		"following events are missing: %+v", missingEvents)
 }
 
 func (e *inputTestingEnvironment) getOutputMessages() []string {
@@ -453,7 +543,7 @@ func (s *testInputStore) CleanupInterval() time.Duration {
 type mockClient struct {
 	publishing []beat.Event
 	published  []beat.Event
-	ackHandler beat.ACKer
+	ackHandler beat.EventListener
 	closed     bool
 	mtx        sync.Mutex
 	canceler   context.CancelFunc
@@ -568,15 +658,15 @@ func (pc *mockPipelineConnector) cancelClient(i int) {
 	pc.clients[i].canceler()
 }
 
-func newMockACKHandler(starter context.Context, blocking bool, config beat.ClientConfig) beat.ACKer {
+func newMockACKHandler(starter context.Context, blocking bool, config beat.ClientConfig) beat.EventListener {
 	if !blocking {
-		return config.ACKHandler
+		return config.EventListener
 	}
 
-	return acker.Combine(blockingACKer(starter), config.ACKHandler)
+	return acker.Combine(blockingACKer(starter), config.EventListener)
 }
 
-func blockingACKer(starter context.Context) beat.ACKer {
+func blockingACKer(starter context.Context) beat.EventListener {
 	return acker.EventPrivateReporter(func(acked int, private []interface{}) {
 		for starter.Err() == nil {
 		}

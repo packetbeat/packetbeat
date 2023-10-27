@@ -36,14 +36,14 @@ const (
 	osqueryCertsDarwinPath  = "private/var/osquery/certs/" + osqueryCertsPEM
 	osqueryCertsWindowsPath = "osquery/certs/" + osqueryCertsPEM
 
-	osqueryVersion = "5.5.1"
+	osqueryVersion = "5.8.2"
 	osqueryMSIExt  = ".msi"
 	osqueryPkgExt  = ".pkg"
 
-	osqueryDistroDarwinSHA256   = "e94f364c6d1e7eb9d25999588cfbf16ad013b214598f1307ade06a09d18f153d"
-	osqueryDistroLinuxSHA256    = "5e21502cfd0ce042ce4acb2c20ae64c20296a5deb10ff053e12a5e342e163b7e"
-	osqueryDistroLinuxARMSHA256 = "f5cb69cd15077807a0fba327e1763cf7ab9ecfcc68caeb0280cb5e3738d44ba5"
-	osqueryDistroWindowsSHA256  = "ee2db367f86da2e82268111c6eb813f1f4b935c535fe0564c294fba0e7fbedba"
+	osqueryDistroDarwinSHA256   = "1fea8ac9b603851d2e76c5fc73138a468a3075a3002c8cb1fd7fff53b889c4dd"
+	osqueryDistroLinuxSHA256    = "5bb2647b45a423e68d7dbc16ab2316c3f512d0944a56e4662c7010b59cddc721"
+	osqueryDistroLinuxARMSHA256 = "e51620928210970abb51d6ec79235bafff73bd354bdb54eec6e5969072d3d115"
+	osqueryDistroWindowsSHA256  = "d319837d4e95d1e477c2126d383501180925a29f488ff1164fa16d2e576f96dd"
 )
 
 type OSArch struct {
@@ -119,7 +119,7 @@ func OsquerydDistroPlatformFilename(platform string) string {
 	case "windows":
 		return OsquerydFilenameForOS(platform)
 	case "darwin":
-		return osqueryName + "-" + osqueryVersion + osqueryPkgExt
+		return OsquerydDarwinApp()
 	}
 	return OsquerydFilename()
 }
@@ -159,8 +159,8 @@ func (s Spec) URL(osname string) string {
 var specs = map[OSArch]Spec{
 	{"linux", "amd64"}:   {"_1.linux_x86_64.tar.gz", osqueryDistroLinuxSHA256, true},
 	{"linux", "arm64"}:   {"_1.linux_aarch64.tar.gz", osqueryDistroLinuxARMSHA256, true},
-	{"darwin", "amd64"}:  {osqueryPkgExt, osqueryDistroDarwinSHA256, false},
-	{"darwin", "arm64"}:  {osqueryPkgExt, osqueryDistroDarwinSHA256, false},
+	{"darwin", "amd64"}:  {osqueryPkgExt, osqueryDistroDarwinSHA256, true},
+	{"darwin", "arm64"}:  {osqueryPkgExt, osqueryDistroDarwinSHA256, true},
 	{"windows", "amd64"}: {osqueryMSIExt, osqueryDistroWindowsSHA256, false},
 }
 

@@ -26,24 +26,31 @@ const headerContentEncoding = "Content-Encoding"
 var (
 	errBodyEmpty       = errors.New("body cannot be empty")
 	errUnsupportedType = errors.New("only JSON objects are accepted")
+	errNotCRC          = errors.New("event not processed as CRC request")
 )
 
 type httpHandler struct {
 	log       *logp.Logger
 	publisher stateless.Publisher
+	metrics   *inputMetrics
 
 	messageField          string
 	responseCode          int
 	responseBody          string
 	includeHeaders        []string
 	preserveOriginalEvent bool
+	crc                   *crcValidator
 }
 
 // Triggers if middleware validation returns successful
 func (h *httpHandler) apiResponse(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	h.metrics.batchesReceived.Add(1)
+	h.metrics.contentLength.Update(r.ContentLength)
 	body, status, err := getBodyReader(r)
 	if err != nil {
 		sendAPIErrorResponse(w, r, h.log, status, err)
+		h.metrics.apiErrors.Add(1)
 		return
 	}
 	defer body.Close()
@@ -51,6 +58,7 @@ func (h *httpHandler) apiResponse(w http.ResponseWriter, r *http.Request) {
 	objs, _, status, err := httpReadJSON(body)
 	if err != nil {
 		sendAPIErrorResponse(w, r, h.log, status, err)
+		h.metrics.apiErrors.Add(1)
 		return
 	}
 
@@ -59,14 +67,38 @@ func (h *httpHandler) apiResponse(w http.ResponseWriter, r *http.Request) {
 		headers = getIncludedHeaders(r, h.includeHeaders)
 	}
 
+	var (
+		respCode int
+		respBody string
+	)
+
+	h.metrics.batchSize.Update(int64(len(objs)))
 	for _, obj := range objs {
+		var err error
+		if h.crc != nil {
+			respCode, respBody, err = h.crc.validate(obj)
+			if err == nil {
+				// CRC request processed
+				break
+			} else if !errors.Is(err, errNotCRC) {
+				h.metrics.apiErrors.Add(1)
+				sendAPIErrorResponse(w, r, h.log, http.StatusBadRequest, err)
+				return
+			}
+		}
+
 		if err = h.publishEvent(obj, headers); err != nil {
+			h.metrics.apiErrors.Add(1)
 			sendAPIErrorResponse(w, r, h.log, http.StatusInternalServerError, err)
 			return
 		}
+		h.metrics.eventsPublished.Add(1)
+		respCode, respBody = h.responseCode, h.responseBody
 	}
 
-	h.sendResponse(w, h.responseCode, h.responseBody)
+	h.sendResponse(w, respCode, respBody)
+	h.metrics.batchProcessingTime.Update(time.Since(start).Nanoseconds())
+	h.metrics.batchesPublished.Add(1)
 }
 
 func (h *httpHandler) sendResponse(w http.ResponseWriter, status int, message string) {

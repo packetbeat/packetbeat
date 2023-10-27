@@ -64,7 +64,7 @@ ENV ELASTIC_CONTAINER "true"
 ENV PATH={{ $beatHome }}:$PATH
 ENV GODEBUG="madvdontneed=1"
 
-# Add an init process, check the checksum to make sure it's a match
+# Add an init process, and check the checksum to make sure it's a match
 RUN set -e ; \
   TINI_BIN=""; \
   TINI_SHA256=""; \
@@ -121,8 +121,9 @@ RUN echo \
 
 # Setup synthetics env vars
 ENV ELASTIC_SYNTHETICS_CAPABLE=true
+ENV TZ=UTC
 ENV SUITES_DIR={{ $beatHome }}/suites
-ENV NODE_VERSION=18.12.0
+ENV NODE_VERSION=18.16.0
 ENV PATH="$NODE_PATH/node/bin:$PATH"
 # Install the latest version of @elastic/synthetics forcefully ignoring the previously
 # cached node_modules, heartbeat then calls the global executable to run test suites
@@ -151,7 +152,7 @@ RUN cd /usr/share/heartbeat/.node \
 RUN chown -R {{ .user }} $NODE_PATH
 USER {{ .user }}
 # If this fails dump the NPM logs
-RUN npm i -g --loglevel verbose -f @elastic/synthetics@stack_release || sh -c 'tail -n +1 /root/.npm/_logs/* && exit 1'
+RUN npm i -g --loglevel verbose --engine-strict @elastic/synthetics@stack_release || sh -c 'tail -n +1 /root/.npm/_logs/* && exit 1'
 RUN chmod ug+rwX -R $NODE_PATH 
 USER root
 
@@ -168,8 +169,10 @@ RUN for iter in {1..10}; do \
 done; \
 (exit $exit_code)
 {{- end }}
+USER 1000
+{{- else }}
+USER 0
 {{- end }}
-USER {{ .user }}
 
 {{- range $i, $port := .ExposePorts }}
 EXPOSE {{ $port }}
