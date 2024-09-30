@@ -22247,11 +22247,11 @@ official policies, either expressed or implied, of Richard Crowley.
 
 --------------------------------------------------------------------------------
 Dependency : github.com/samuel/go-thrift
-Version: v0.0.0-20140522043831-2187045faa54
+Version: v0.0.0-20210915161234-7b67f98e972f
 Licence type (autodetected): BSD-3-Clause
 --------------------------------------------------------------------------------
 
-Contents of probable licence file $GOMODCACHE/github.com/samuel/go-thrift@v0.0.0-20140522043831-2187045faa54/LICENSE:
+Contents of probable licence file $GOMODCACHE/github.com/samuel/go-thrift@v0.0.0-20210915161234-7b67f98e972f/LICENSE:
 
 Copyright (c) 2012, Samuel Stauffer <samuel@descolada.com>
 All rights reserved.
@@ -51483,14 +51483,6 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-
---------------------------------------------------------------------------------
-Dependency : github.com/samuel/go-parser
-Version: v0.0.0-20130731160455-ca8abbf65d0e
-Licence type (autodetected): BSD-3-Clause
---------------------------------------------------------------------------------
-
-No licence file provided.
 
 --------------------------------------------------------------------------------
 Dependency : github.com/sergi/go-diff
