@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/elastic/beats/v7/dev-tools/mage/target/srvrlesstest"
 	"os"
 	"path/filepath"
 	"time"
@@ -212,4 +213,10 @@ func GoIntegTest(ctx context.Context) error {
 func PythonIntegTest(ctx context.Context) error {
 	mg.Deps(BuildSystemTestBinary)
 	return devtools.PythonIntegTestFromHost(devtools.DefaultPythonTestIntegrationFromHostArgs())
+}
+
+// ServerlessTest starts serverless integration tests
+func ServerlessTest(ctx context.Context, beat string) error {
+	devtools.TestBeatServerless(beat)
+	return srvrlesstest.IntegRunner(ctx, false, "TestBeatsServerless")
 }
