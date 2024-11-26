@@ -166,6 +166,11 @@ func NewHarvester(
 		h.state.TTL = h.config.CleanInactive
 	}
 
+	// Enable/disable cleaning removed files from the registrar
+	if h.config.CleanRemoved {
+		h.state.CleanRemoved = h.config.CleanRemoved
+	}
+
 	// Add outlet signal so harvester can also stop itself
 	return h, nil
 }
@@ -444,7 +449,10 @@ func (h *Harvester) onMessage(
 	// Check if json fields exist
 	var jsonFields mapstr.M
 	if f, ok := fields["json"]; ok {
-		jsonFields = f.(mapstr.M)
+		jsonFields, ok = f.(mapstr.M)
+		if !ok {
+			h.logger.Debugf("Error converting jsonFields from state %v", state.IdentifierName)
+		}
 	}
 
 	var meta mapstr.M
